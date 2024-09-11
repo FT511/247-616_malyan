@@ -5,6 +5,7 @@
 #include <stdio.h>
 #include <errno.h>
 #include <unistd.h>
+#include <sys/wait.h> 
 #include "main.h"
 #include "piloteSerieUSB.h"
 #include "interfaceTouche.h"
@@ -19,6 +20,10 @@ void main_termine(void);
 
 //Definitions de variables privees:
 //pas de variables privees
+int fd; //File Descriptor
+int pipeLecture[2];
+int pipeEcriture[2];
+int pipeErreur[2];
 
 //Definitions de fonctions privees:
 int main_initialise(void)
@@ -45,23 +50,24 @@ void main_termine(void)
   interfaceMalyan_termine();
 }
 
-//Definitions de variables publiques:
-//pas de variables publiques
 
 
-//Definitions de fonctions publiques:
-int main(int argc,char** argv)
+void codeDuProcessusParent(void)
 {
-int erreur = 0;
-unsigned char toucheLue='D';
-char reponse[MAIN_LONGUEUR_MAXIMALE+1];
-int nombre;
+  int erreur = 0;
 
-  if (main_initialise())
-  {
-    printf("main_initialise: erreur\n");
-    return 0;
-  }
+  unsigned char toucheLue='D';
+  char reponse[MAIN_LONGUEUR_MAXIMALE+1];
+  int nombre;
+
+  char read_byte = 0;
+  char write_byte = 0;
+
+
+  close(pipeLecture[1]);   //Fermer extremite ecriture
+  close(pipeEcriture[0]);  //Fermer extremite lecture 
+  close(pipeErreur[1]);    //Fermer extremite ecriture
+ 
 
   fprintf(stdout,"Tapez:\n\r");
   fprintf(stdout, "Q\": pour terminer.\n\r");
@@ -79,6 +85,78 @@ int nombre;
     toucheLue = interfaceTouche_lit();
     printf("Caractère lu = '%c'\n", toucheLue);
     switch (toucheLue)
+    {
+      case '6':
+        write_byte = '6';
+      break;
+      case '7':
+        write_byte = '7';
+      break;
+      case '8':
+        write_byte = '8';
+      break;
+      case 'P':
+        write_byte = 'P';
+      break;
+      case 'H':
+        write_byte = 'H';
+      break;
+      default:
+      break;
+    }
+
+    write(pipeEcriture[1], &write_byte, 1);
+
+    read(pipeErreur[0], &erreur, 1);
+    if (erreur == 1)
+    {
+      printf("erreur lors de la gestion de la commande\n");
+      break;
+    }
+    else
+    {
+      usleep(100000);                
+      nombre = interfaceMalyan_recoitUneReponse(reponse, MAIN_LONGUEUR_MAXIMALE);
+      if (nombre < 0)
+      {
+        erreur = errno;
+        printf("main: erreur lors de la lecture: %d\n", erreur);
+        perror("erreur: ");
+      }
+      else
+      {
+        reponse[nombre] = '\0';
+        printf("nombre reçu: %d, réponse: %s", nombre, reponse);      
+//      fflush(stdout);
+      }
+    }
+
+    read(pipeLecture[0], &read_byte, 1);
+
+  }
+
+  write_byte = 'Q';
+  write(pipeEcriture[1], &write_byte, 1);
+  // Arreter l'enfant 
+}
+
+
+void codeDuProcessusEnfant(void)
+{
+  int erreur = 0;
+
+  char read_byte = 0;
+  //char write_byte = 0;
+
+  close(pipeLecture[0]);   //Fermer extremite lecture
+  close(pipeEcriture[1]);  //Fermer extremite ecriture
+  close(pipeErreur[0]);    //Fermer extremite lecture
+
+  while(1)
+  {
+    read(pipeLecture[0], &read_byte, 1);
+
+    switch (read_byte)
     {
       case '6':
         if (interfaceMalyan_demarreLeVentilateur() < 0)
@@ -116,29 +194,51 @@ int nombre;
           erreur = 1;
         }
     }
-    if (erreur == 1)
+
+     write(pipeErreur[1], &erreur, 1);
+
+    if(read_byte == 'Q')
     {
-      printf("erreur lors de la gestion de la commande\n");
       break;
     }
-    else
-    {
-      usleep(100000);                
-      nombre = interfaceMalyan_recoitUneReponse(reponse, MAIN_LONGUEUR_MAXIMALE);
-      if (nombre < 0)
-      {
-        erreur = errno;
-        printf("main: erreur lors de la lecture: %d\n", erreur);
-        perror("erreur: ");
-      }
-      else
-      {
-        reponse[nombre] = '\0';
-        printf("nombre reçu: %d, réponse: %s", nombre, reponse);      
-//      fflush(stdout);
-      }
-    }
   }
+}
+
+//Definitions de variables publiques:
+//pas de variables publiques
+
+
+//Definitions de fonctions publiques:
+int main(int argc,char** argv)
+{
+
+
+  pid_t pid;
+  
+
+  
+
+  if (main_initialise())
+  {
+    printf("main_initialise: erreur\n");
+    return 0;
+  }
+
+  pid = fork();
+
+  if(pid == 0)
+  {
+    codeDuProcessusEnfant();
+  }
+
+    // Appel fonction Parent
+  if(pid != 0)
+  {
+    codeDuProcessusParent();
+    wait(NULL);
+  }
+  
+  
   main_termine();
   return EXIT_SUCCESS;
 }

@@ -98,6 +98,7 @@ int retour;
 
 unsigned char interfaceTouche_lit(void)
 {
+    fflush(stdin);
     return getchar();
 }
 
