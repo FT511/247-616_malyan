@@ -60,6 +60,8 @@ struct termios modeRaw;
     {
         return -1;
     }
+
+
     return 0;
 }
 
@@ -98,7 +100,6 @@ int retour;
 
 unsigned char interfaceTouche_lit(void)
 {
-    fflush(stdin);
     return getchar();
 }
 
